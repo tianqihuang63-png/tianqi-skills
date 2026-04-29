@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SKILLS_DIR="$HOME/.claude/skills"
-REPO_DIR="/tmp/tianqi-skills"
+REPO_DIR="$HOME/tianqi-skills"
 
 # 如果仓库不在 /tmp（可能被清理），尝试 ~/Projects
 if [ ! -d "$REPO_DIR/.git" ]; then
