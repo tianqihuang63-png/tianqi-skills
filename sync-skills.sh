@@ -23,39 +23,39 @@ categorize() {
     local desc="$2"
 
     # lark 系列
-    if [[ "$name" == lark-* ]]; then echo "lark"; return; fi
+    if [[ "$name" == lark-* ]]; then echo "飞书集成"; return; fi
 
     # baoyu 内容系列
-    if [[ "$name" == baoyu-* ]]; then echo "content"; return; fi
+    if [[ "$name" == baoyu-* ]]; then echo "内容创作"; return; fi
 
     # 设计相关
     if [[ "$desc" =~ [Dd]esign|[Uu][Ii]/[Uu][Xx]|[Cc]anvas|[Aa]rt|[Ss]hadcn|[Tt]heme|[Pp]encil|[Ff]rontend-design|[Ii]nterface-design|[Tt]aste|[Ii]mpeccable ]]; then
-        echo "design"; return; fi
+        echo "设计工具"; return; fi
 
     # 工作流
     if [[ "$name" =~ ^(freeze|unfreeze|guard|ship|health|autoplan|neat-freak|checkpoint|office-hours|pair-agent)$ ]]; then
-        echo "workflow"; return; fi
+        echo "工作流"; return; fi
     if [[ "$desc" =~ [Pp]arallel.agent|[Ss]ubagent|[Ww]orktree|[Vv]erification|work.flows? ]]; then
-        echo "workflow"; return; fi
+        echo "工作流"; return; fi
 
     # 内容创作
     if [[ "$name" =~ ^(hv-analysis|khazix-writer|doc-coauthoring|internal-comms|brainstorming|targeted-chatroom|emotion-self-coach)$ ]]; then
-        echo "content"; return; fi
+        echo "内容创作"; return; fi
     if [[ "$desc" =~ [Ww]riting|[Cc]oauthor|[Bb]log|[Aa]rticle|[Tt]ranslat|[Cc]ontent.creat ]]; then
-        echo "content"; return; fi
+        echo "内容创作"; return; fi
 
     # 开发工具
     if [[ "$name" =~ ^(claude-api|mcp-builder|systematic-debugging|code-review|qa|test-driven|skill-creator|writing-skill|writing-plan|release|review|investigate|benchmark|web-access|webapp|vercel|learn|canary|codex|cso|devex|plan-|retro|using-superpower|web-design|web-artifact)$ ]]; then
-        echo "dev-tools"; return; fi
+        echo "开发工具"; return; fi
     if [[ "$desc" =~ [Dd]ebug|[Tt]est|[Rr]eview|[Mm]CP|[Aa]PI|[Cc]laude|[Rr]elease|[Bb]enchmark ]]; then
-        echo "dev-tools"; return; fi
+        echo "开发工具"; return; fi
 
     # 第三方工具
     if [[ "$name" =~ ^(pdf|docx|xlsx|pptx|image-utils|slack-gif|seo-audit|browse|open-gstack|yunshu|setup-browser|setup-deploy|document-release|brand-guidelines|design-consultation|design-html|design-review|design-shotgun)$ ]]; then
-        echo "third-party"; return; fi
+        echo "第三方工具"; return; fi
 
-    # 默认归到 dev-tools
-    echo "dev-tools"
+    # 默认归到开发工具
+    echo "开发工具"
 }
 
 # ─── 安全扫描：检测敏感信息 ───
@@ -167,7 +167,7 @@ for item in "$SKILLS_DIR"/*; do
 
     # 检查是否已在仓库中
     found=false
-    for cat_dir in lark workflow design content dev-tools third-party; do
+    for cat_dir in 飞书集成 工作流 设计工具 内容创作 开发工具 第三方工具; do
         if [ -e "$REPO_DIR/$cat_dir/$name" ]; then
             found=true
             # 检查是否有变更
@@ -202,7 +202,7 @@ for item in "$SKILLS_DIR"/*; do
 
     # 已有 skill 有变更时也要扫描
     if [ "$found" = true ] && [ $CHANGED -gt 0 ]; then
-        for cat_dir in lark workflow design content dev-tools third-party; do
+        for cat_dir in 飞书集成 工作流 设计工具 内容创作 开发工具 第三方工具; do
             if [ -e "$REPO_DIR/$cat_dir/$name" ]; then
                 if ! security_check "$item"; then
                     BLOCKED=$((BLOCKED + 1))
