@@ -58,10 +58,94 @@ categorize() {
     echo "dev-tools"
 }
 
+# ─── 安全扫描：检测敏感信息 ───
+# 扫描单个 skill 目录，返回 0（安全）或 1（有风险）
+security_check() {
+    local target="$1"
+    local name=$(basename "$target")
+    local findings=""
+
+    # 1. 硬编码密钥/Token（排除测试文件和占位符）
+    local secrets=$(grep -rn \
+        -E '(sk-[a-z0-9]{20,}|ghp_[a-zA-Z0-9]{30,}|gho_[a-zA-Z0-9]{30,}|AKIA[0-9A-Z]{16}|t0k_[a-zA-Z0-9]{20,}|xox[bpsa]-[a-zA-Z0-9-]{20,})' \
+        "$target" \
+        --include='*.py' --include='*.js' --include='*.ts' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.env' --include='*.md' --include='*.sh' \
+        2>/dev/null | grep -v 'example\|placeholder\|YOUR_\|your_\|xxx\|<\|```' | grep -v '/test/' | grep -v '__tests__')
+
+    if [ -n "$secrets" ]; then
+        findings="${findings}  [硬编码密钥] 检测到疑似真实密钥:\n${secrets}\n"
+    fi
+
+    # 2. 密码明文
+    local passwords=$(grep -rn \
+        -iE '(password\s*[=:]\s*['\''"][^'\''"]{6,}['\''"]|passwd\s*[=:]\s*['\''"][^'\''"]{6,}['\''"])' \
+        "$target" \
+        --include='*.py' --include='*.js' --include='*.ts' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.env' --include='*.sh' \
+        2>/dev/null | grep -v 'example\|placeholder\|YOUR_\|your_\|xxx\|changeme\|password123\|test')
+
+    if [ -n "$passwords" ]; then
+        findings="${findings}  [密码明文] 检测到疑似密码:\n${passwords}\n"
+    fi
+
+    # 3. 私钥文件
+    local private_keys=$(find "$target" -type f \( -name "*.pem" -o -name "*.key" -o -name "id_rsa*" -o -name "id_ed25519*" -o -name "*.p12" -o -name "*.pfx" \) 2>/dev/null)
+
+    if [ -n "$private_keys" ]; then
+        findings="${findings}  [私钥文件] 检测到:\n${private_keys}\n"
+    fi
+
+    # 4. .env 文件（可能包含环境变量密钥）
+    local env_files=$(find "$target" -maxdepth 2 -name ".env" -o -name ".env.local" -o -name ".env.production" 2>/dev/null)
+
+    if [ -n "$env_files" ]; then
+        # 检查 .env 里是否有真实值（排除空值和占位符）
+        local env_secrets=$(grep -E '=.+' $env_files 2>/dev/null | grep -v '=false\|=true\|=$\|=#[^=]*$\|YOUR_\|your_\|placeholder\|changeme\|xxx' | head -5)
+        if [ -n "$env_secrets" ]; then
+            findings="${findings}  [.env 文件] 检测到可能含敏感信息的配置:\n${env_secrets}\n"
+        fi
+    fi
+
+    # 5. 数据库连接串
+    local db_urls=$(grep -rn \
+        -iE '(mongodb(\+srv)?://[^$\s]+|postgres(ql)?://[^$\s]+:[^$\s]+@|mysql://[^$\s]+:[^$\s]+@|redis://[^$\s]+:[^$\s]+@)' \
+        "$target" \
+        --include='*.py' --include='*.js' --include='*.ts' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.env' \
+        2>/dev/null | grep -v 'example\|localhost\|127\.0\.0\.1\|YOUR_\|placeholder')
+
+    if [ -n "$db_urls" ]; then
+        findings="${findings}  [数据库连接串] 检测到含密码的连接串:\n${db_urls}\n"
+    fi
+
+    # 6. Webhook URL（可能被滥用）
+    local webhooks=$(grep -rn \
+        -iE '(https://hooks\.slack\.com/services/T[A-Z0-9]+/|https://discord\.com/api/webhooks/[0-9]+/|https://qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=)' \
+        "$target" \
+        --include='*.py' --include='*.js' --include='*.ts' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.md' \
+        2>/dev/null | grep -v 'example\|YOUR_\|placeholder\|xxx')
+
+    if [ -n "$webhooks" ]; then
+        findings="${findings}  [Webhook URL] 检测到真实 Webhook 地址:\n${webhooks}\n"
+    fi
+
+    if [ -n "$findings" ]; then
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  SECURITY ALERT: $name 存在安全风险"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo -e "$findings"
+        echo "  已阻止上传。请先移除敏感信息后再同步。"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        return 1
+    fi
+
+    return 0
+}
+
 cd "$REPO_DIR"
 
 CHANGED=0
 ADDED=0
+BLOCKED=0
+BLOCKED_LIST=""
 
 # 遍历所有本地 skill
 for item in "$SKILLS_DIR"/*; do
@@ -100,6 +184,12 @@ for item in "$SKILLS_DIR"/*; do
     done
 
     if [ "$found" = false ]; then
+        # 新增 skill 必须通过安全扫描
+        if ! security_check "$item"; then
+            BLOCKED=$((BLOCKED + 1))
+            BLOCKED_LIST="${BLOCKED_LIST}  - $category/$name\n"
+            continue
+        fi
         echo "[新增] $category/$name"
         mkdir -p "$REPO_DIR/$category"
         if [ -d "$item" ]; then
@@ -109,15 +199,42 @@ for item in "$SKILLS_DIR"/*; do
         fi
         ADDED=$((ADDED + 1))
     fi
+
+    # 已有 skill 有变更时也要扫描
+    if [ "$found" = true ] && [ $CHANGED -gt 0 ]; then
+        for cat_dir in lark workflow design content dev-tools third-party; do
+            if [ -e "$REPO_DIR/$cat_dir/$name" ]; then
+                if ! security_check "$item"; then
+                    BLOCKED=$((BLOCKED + 1))
+                    BLOCKED_LIST="${BLOCKED_LIST}  - $category/$name（更新）\n"
+                    # 回滚：删除已复制的文件
+                    rm -rf "$REPO_DIR/$cat_dir/$name"
+                    # 恢复旧版本
+                    git checkout -- "$cat_dir/$name" 2>/dev/null || true
+                    CHANGED=$((CHANGED - 1))
+                fi
+                break
+            fi
+        done
+    fi
 done
 
-if [ $CHANGED -eq 0 ] && [ $ADDED -eq 0 ]; then
+if [ $CHANGED -eq 0 ] && [ $ADDED -eq 0 ] && [ $BLOCKED -eq 0 ]; then
     echo "所有 skill 已是最新，无需同步。"
     exit 0
 fi
 
 echo ""
 echo "变更: $CHANGED 个更新, $ADDED 个新增"
+
+if [ $BLOCKED -gt 0 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  BLOCKED: $BLOCKED 个 skill 因安全风险被阻止"
+    echo -e "$BLOCKED_LIST"
+    echo "  请检查上述 skill，移除敏感信息后重新运行。"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+fi
 
 # Git 操作
 git add -A
